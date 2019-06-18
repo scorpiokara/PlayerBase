@@ -45,6 +45,8 @@ public class PlayerConfig {
     private static boolean useDefaultNetworkEventProducer = false;
 
     private static boolean playRecordState = false;
+    //use cache
+    private static boolean useCache = false;
 
     static {
         mPlans = new SparseArrayCompat<>(2);
@@ -111,4 +113,11 @@ public class PlayerConfig {
         return playRecordState;
     }
 
+    public static void setUseCache(boolean cache) {
+        useCache  = cache;
+    }
+
+    public static boolean isUseCache() {
+        return useCache;
+    }
 }

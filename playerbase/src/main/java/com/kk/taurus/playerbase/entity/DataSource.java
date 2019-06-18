@@ -22,6 +22,7 @@ import android.content.res.AssetFileDescriptor;
 import android.net.Uri;
 import android.text.TextUtils;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.HashMap;
@@ -101,11 +102,26 @@ public class DataSource implements Serializable {
 
     private boolean isLive;
 
+    /**
+     * 是否需要缓存
+     */
+    private boolean cache;
+
+    /**
+     * 自定义缓存目录，默认使用AndroidVideoCache 的目录
+     */
+    private File cacheFile;
+
     public DataSource() {
     }
 
     public DataSource(String data) {
         this.data = data;
+    }
+
+    public DataSource(String data, boolean cache) {
+        this.data = data;
+        this.cache = cache;
     }
 
     public DataSource(String tag, String data) {
@@ -207,6 +223,22 @@ public class DataSource implements Serializable {
 
     public void setRawId(int rawId) {
         this.rawId = rawId;
+    }
+
+    public boolean isCache() {
+        return cache;
+    }
+
+    public void setCache(boolean cache) {
+        this.cache = cache;
+    }
+
+    public File getCacheFile() {
+        return cacheFile;
+    }
+
+    public void setCacheFile(File cacheFile) {
+        this.cacheFile = cacheFile;
     }
 
     public static Uri buildRawPath(String packageName, int rawId){

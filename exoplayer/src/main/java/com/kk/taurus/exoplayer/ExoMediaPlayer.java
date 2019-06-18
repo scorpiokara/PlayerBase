@@ -23,6 +23,7 @@ import android.text.TextUtils;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 
+import com.danikula.videocache.StorageUtils;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.DefaultRenderersFactory;
 import com.google.android.exoplayer2.ExoPlaybackException;
@@ -32,13 +33,17 @@ import com.google.android.exoplayer2.PlaybackParameters;
 import com.google.android.exoplayer2.Player;
 import com.google.android.exoplayer2.RenderersFactory;
 import com.google.android.exoplayer2.SimpleExoPlayer;
+import com.google.android.exoplayer2.extractor.DefaultExtractorsFactory;
 import com.google.android.exoplayer2.source.ExtractorMediaSource;
+import com.google.android.exoplayer2.source.LoopingMediaSource;
 import com.google.android.exoplayer2.source.MediaSource;
 import com.google.android.exoplayer2.source.MergingMediaSource;
 import com.google.android.exoplayer2.source.SingleSampleMediaSource;
 import com.google.android.exoplayer2.source.TrackGroupArray;
 import com.google.android.exoplayer2.source.dash.DashMediaSource;
+import com.google.android.exoplayer2.source.dash.DefaultDashChunkSource;
 import com.google.android.exoplayer2.source.hls.HlsMediaSource;
+import com.google.android.exoplayer2.source.smoothstreaming.DefaultSsChunkSource;
 import com.google.android.exoplayer2.source.smoothstreaming.SsMediaSource;
 import com.google.android.exoplayer2.trackselection.DefaultTrackSelector;
 import com.google.android.exoplayer2.trackselection.TrackSelectionArray;
@@ -48,8 +53,18 @@ import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter;
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory;
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSourceFactory;
 import com.google.android.exoplayer2.upstream.RawResourceDataSource;
+import com.google.android.exoplayer2.upstream.cache.Cache;
+import com.google.android.exoplayer2.upstream.cache.CacheDataSource;
+import com.google.android.exoplayer2.upstream.cache.CacheDataSourceFactory;
+import com.google.android.exoplayer2.upstream.cache.CacheSpan;
+import com.google.android.exoplayer2.upstream.cache.CacheUtil;
+import com.google.android.exoplayer2.upstream.cache.ContentMetadata;
+import com.google.android.exoplayer2.upstream.cache.LeastRecentlyUsedCacheEvictor;
+import com.google.android.exoplayer2.upstream.cache.SimpleCache;
 import com.google.android.exoplayer2.util.Util;
 import com.google.android.exoplayer2.video.VideoListener;
+import com.kk.taurus.exoplayer.source.GSYExoHttpDataSource;
+import com.kk.taurus.exoplayer.source.GSYExoHttpDataSourceFactory;
 import com.kk.taurus.playerbase.config.AppContextAttach;
 import com.kk.taurus.playerbase.config.PlayerConfig;
 import com.kk.taurus.playerbase.config.PlayerLibrary;
@@ -64,7 +79,11 @@ import com.kk.taurus.playerbase.log.PLog;
 import com.kk.taurus.playerbase.player.BaseInternalPlayer;
 import com.kk.taurus.playerbase.player.IPlayer;
 
+import java.io.File;
 import java.util.HashMap;
+import java.util.Map;
+import java.util.NavigableSet;
+
 
 public class ExoMediaPlayer extends BaseInternalPlayer {
 
@@ -74,6 +93,7 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
 
     private final Context mAppContext;
     private SimpleExoPlayer mInternalPlayer;
+
 
     private int mVideoWidth, mVideoHeight;
 
@@ -85,7 +105,20 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
 
     private final DefaultBandwidthMeter mBandwidthMeter;
 
-    public static void init(Context context){
+    private static final long DEFAULT_MAX_SIZE = 512 * 1024 * 1024;
+
+    private static Cache mCache;
+    private String mSourceUrl;
+    private boolean isCached = false;
+    private HashMap<String, String> heads;
+
+    /**
+     * 忽律Https证书校验
+     */
+    private static boolean mSkipSSLChain = true;
+
+
+    public static void init(Context context) {
         PlayerConfig.addDecoderPlan(new DecoderPlan(
                 PLAN_ID,
                 ExoMediaPlayer.class.getName(),
@@ -94,9 +127,10 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
         PlayerLibrary.init(context);
     }
 
-    public ExoMediaPlayer(){
+    public ExoMediaPlayer() {
         mAppContext = AppContextAttach.getApplicationContext();
-        RenderersFactory renderersFactory = new DefaultRenderersFactory(mAppContext);
+        RenderersFactory renderersFactory = new DefaultRenderersFactory(mAppContext,
+                DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER);
         DefaultTrackSelector trackSelector =
                 new DefaultTrackSelector();
         mInternalPlayer = ExoPlayerFactory.newSimpleInstance(mAppContext, renderersFactory, trackSelector);
@@ -106,6 +140,7 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
 
         mInternalPlayer.addListener(mEventListener);
 
+
     }
 
     @Override
@@ -113,17 +148,18 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
         updateStatus(STATE_INITIALIZED);
         mInternalPlayer.addVideoListener(mVideoListener);
         String data = dataSource.getData();
+        mSourceUrl = data;
         Uri uri = dataSource.getUri();
         String assetsPath = dataSource.getAssetsPath();
         int rawId = dataSource.getRawId();
 
         Uri videoUri = null;
 
-        if(!TextUtils.isEmpty(data)){
+        if (!TextUtils.isEmpty(data)) {
             videoUri = Uri.parse(data);
-        }else if(uri!=null){
+        } else if (uri != null) {
             videoUri = uri;
-        }else if(!TextUtils.isEmpty(assetsPath)){
+        } else if (!TextUtils.isEmpty(assetsPath)) {
             try {
                 DataSpec dataSpec = new DataSpec(DataSource.buildAssetsUri(assetsPath));
                 AssetDataSource assetDataSource = new AssetDataSource(mAppContext);
@@ -132,7 +168,7 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
             } catch (AssetDataSource.AssetDataSourceException e) {
                 e.printStackTrace();
             }
-        }else if(rawId > 0){
+        } else if (rawId > 0) {
             try {
                 DataSpec dataSpec = new DataSpec(RawResourceDataSource.buildRawResourceUri(dataSource.getRawId()));
                 RawResourceDataSource rawResourceDataSource = new RawResourceDataSource(mAppContext);
@@ -143,7 +179,7 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
             }
         }
 
-        if(videoUri==null){
+        if (videoUri == null) {
             Bundle bundle = BundlePool.obtain();
             bundle.putString(EventKey.STRING_DATA, "Incorrect setting of playback data!");
             submitErrorEvent(OnErrorEventListener.ERROR_EVENT_IO, bundle);
@@ -151,29 +187,35 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
         }
 
         //create DefaultDataSourceFactory
-        com.google.android.exoplayer2.upstream.DataSource.Factory dataSourceFactory =
-                new DefaultDataSourceFactory(mAppContext,
-                        Util.getUserAgent(mAppContext, mAppContext.getPackageName()), mBandwidthMeter);
+//        com.google.android.exoplayer2.upstream.DataSource.Factory dataSourceFactory =
+//                new DefaultDataSourceFactory(mAppContext,
+//                        Util.getUserAgent(mAppContext, mAppContext.getPackageName()), mBandwidthMeter);
 
         //if scheme is http or https and DataSource contain extra data, use DefaultHttpDataSourceFactory.
-        String scheme = videoUri.getScheme();
-        HashMap<String, String> extra = dataSource.getExtra();
-        if(extra!=null && extra.size()>0 &&
-                ("http".equalsIgnoreCase(scheme)||"https".equalsIgnoreCase(scheme))){
-            dataSourceFactory = new DefaultHttpDataSourceFactory(
-                    Util.getUserAgent(mAppContext, mAppContext.getPackageName()));
-            ((DefaultHttpDataSourceFactory)dataSourceFactory).getDefaultRequestProperties().set(extra);
-        }
+//        String scheme = videoUri.getScheme();
+        heads = dataSource.getExtra();
+
+//        if(heads!=null && heads.size()>0 &&
+//                ("http".equalsIgnoreCase(scheme)||"https".equalsIgnoreCase(scheme))){
+//            dataSourceFactory = new DefaultHttpDataSourceFactory(
+//                    Util.getUserAgent(mAppContext, mAppContext.getPackageName()));
+//            ((DefaultHttpDataSourceFactory)dataSourceFactory).getDefaultRequestProperties().set(heads);
+//        }
 
         // Prepare the player with the source.
         isPreparing = true;
 
         //create MediaSource
-        MediaSource mediaSource = getMediaSource(videoUri, dataSourceFactory);
+        MediaSource mediaSource = getMediaSource(videoUri,
+                heads != null && heads.size() > 0,
+                PlayerConfig.isUseCache() || dataSource.isCache(),
+                false,
+                StorageUtils.getIndividualCacheDirectory(mAppContext));
+
 
         //handle timed text source
         TimedTextSource timedTextSource = dataSource.getTimedTextSource();
-        if(timedTextSource!=null){
+        if (timedTextSource != null) {
             Format format = Format.createTextSampleFormat(null, timedTextSource.getMimeType(), timedTextSource.getFlag(), null);
             MediaSource timedTextMediaSource = new SingleSampleMediaSource.Factory(new DefaultDataSourceFactory(mAppContext,
                     Util.getUserAgent(mAppContext, mAppContext.getPackageName())))
@@ -187,23 +229,195 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
 
         Bundle sourceBundle = BundlePool.obtain();
         sourceBundle.putSerializable(EventKey.SERIALIZABLE_DATA, dataSource);
-        submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_DATA_SOURCE_SET,sourceBundle);
+        submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_DATA_SOURCE_SET, sourceBundle);
 
     }
 
-    private MediaSource getMediaSource(Uri uri, com.google.android.exoplayer2.upstream.DataSource.Factory dataSourceFactory){
-        int contentType = Util.inferContentType(uri);
+//    private MediaSource getMediaSource(Uri uri, com.google.android.exoplayer2.upstream.DataSource.Factory dataSourceFactory) {
+//        int contentType = Util.inferContentType(uri);
+//        switch (contentType) {
+//            case C.TYPE_DASH:
+//                return new DashMediaSource.Factory(dataSourceFactory).createMediaSource(uri);
+//            case C.TYPE_SS:
+//                return new SsMediaSource.Factory(dataSourceFactory).createMediaSource(uri);
+//            case C.TYPE_HLS:
+//                return new HlsMediaSource.Factory(dataSourceFactory).createMediaSource(uri);
+//            case C.TYPE_OTHER:
+//            default:
+//                // This is the MediaSource representing the media to be played.
+//                return new ExtractorMediaSource.Factory(dataSourceFactory).createMediaSource(uri);
+//        }
+//    }
+
+
+    /**
+     * @param dataSource  链接
+     * @param preview     是否带上header，默认有header自动设置为true
+     * @param cacheEnable 是否需要缓存
+     * @param isLooping   是否循环
+     * @param cacheDir    自定义缓存目录
+     */
+    public MediaSource getMediaSource(Uri dataSource, boolean preview, boolean cacheEnable, boolean isLooping, File cacheDir) {
+        MediaSource mediaSource;
+        int contentType = Util.inferContentType(dataSource);
         switch (contentType) {
-            case C.TYPE_DASH:
-                return new DashMediaSource.Factory(dataSourceFactory).createMediaSource(uri);
             case C.TYPE_SS:
-                return new SsMediaSource.Factory(dataSourceFactory).createMediaSource(uri);
+                mediaSource = new SsMediaSource.Factory(
+                        new DefaultSsChunkSource.Factory(getDataSourceFactoryCache(mAppContext, cacheEnable, preview, cacheDir)),
+                        new DefaultDataSourceFactory(mAppContext, null,
+                                getHttpDataSourceFactory(mAppContext, preview))).createMediaSource(dataSource);
+                break;
+            case C.TYPE_DASH:
+                mediaSource = new DashMediaSource.Factory(new DefaultDashChunkSource.Factory(getDataSourceFactoryCache(mAppContext, cacheEnable, preview, cacheDir)),
+                        new DefaultDataSourceFactory(mAppContext, null,
+                                getHttpDataSourceFactory(mAppContext, preview))).createMediaSource(dataSource);
+                break;
             case C.TYPE_HLS:
-                return new HlsMediaSource.Factory(dataSourceFactory).createMediaSource(uri);
+                mediaSource = new HlsMediaSource.Factory(getDataSourceFactoryCache(mAppContext, cacheEnable, preview, cacheDir)).createMediaSource(dataSource);
+                break;
             case C.TYPE_OTHER:
             default:
-                // This is the MediaSource representing the media to be played.
-                return new ExtractorMediaSource.Factory(dataSourceFactory).createMediaSource(uri);
+                mediaSource = new ExtractorMediaSource.Factory(getDataSourceFactoryCache(mAppContext, cacheEnable, preview, cacheDir))
+                        .setExtractorsFactory(new DefaultExtractorsFactory())
+                        .createMediaSource(dataSource);
+                break;
+        }
+        if (isLooping) {
+            return new LoopingMediaSource(mediaSource);
+        }
+        return mediaSource;
+    }
+
+    /**
+     * 本地缓存目录
+     */
+    public static synchronized Cache getCacheSingleInstance(Context context, File cacheDir) {
+        String dirs = context.getCacheDir().getAbsolutePath();
+        if (cacheDir != null) {
+            dirs = cacheDir.getAbsolutePath();
+        }
+        if (mCache == null) {
+            String path = dirs + File.separator + "exo";
+            boolean isLocked = SimpleCache.isCacheFolderLocked(new File(path));
+            if (!isLocked) {
+                mCache = new SimpleCache(new File(path), new LeastRecentlyUsedCacheEvictor(DEFAULT_MAX_SIZE));
+            }
+        }
+        return mCache;
+    }
+
+    /**
+     * 根据缓存块判断是否缓存成功
+     *
+     * @param cache
+     */
+    private static boolean resolveCacheState(Cache cache, String url) {
+        boolean isCache = true;
+        if (!TextUtils.isEmpty(url)) {
+            String key = CacheUtil.generateKey(Uri.parse(url));
+            if (!TextUtils.isEmpty(key)) {
+                NavigableSet<CacheSpan> cachedSpans = cache.getCachedSpans(key);
+                if (cachedSpans.size() == 0) {
+                    isCache = false;
+                } else {
+                    long contentLength = cache.getContentMetadata(key).get(ContentMetadata.KEY_CONTENT_LENGTH, C.LENGTH_UNSET);
+                    long currentLength = 0;
+                    for (CacheSpan cachedSpan : cachedSpans) {
+                        currentLength += cache.getCachedLength(key, cachedSpan.position, cachedSpan.length);
+                    }
+                    isCache = currentLength >= contentLength;
+                }
+            } else {
+                isCache = false;
+            }
+        }
+        return isCache;
+    }
+
+    /**
+     * 获取SourceFactory，是否带Cache
+     */
+    private com.google.android.exoplayer2.upstream.DataSource.Factory getDataSourceFactoryCache(Context context, boolean cacheEnable, boolean preview, File cacheDir) {
+        if (cacheEnable) {
+            Cache cache = getCacheSingleInstance(context, cacheDir);
+            if (cache != null) {
+                isCached = resolveCacheState(cache, mSourceUrl);
+                return new CacheDataSourceFactory(cache, getDataSourceFactory(context, preview), CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR);
+            }
+        }
+        return getDataSourceFactory(context, preview);
+    }
+
+    /**
+     * 获取SourceFactory
+     */
+    private com.google.android.exoplayer2.upstream.DataSource.Factory getDataSourceFactory(Context context, boolean preview) {
+        return new DefaultDataSourceFactory(context, preview ? null : new DefaultBandwidthMeter(),
+                getHttpDataSourceFactory(context, preview));
+    }
+
+    private com.google.android.exoplayer2.upstream.DataSource.Factory getHttpDataSourceFactory(Context context, boolean preview) {
+        boolean allowCrossProtocolRedirects = false;
+        if (heads != null && heads.size() > 0) {
+            allowCrossProtocolRedirects = "true".equals(heads.get("allowCrossProtocolRedirects"));
+        }
+        if (mSkipSSLChain) {
+            GSYExoHttpDataSourceFactory dataSourceFactory = new GSYExoHttpDataSourceFactory(Util.getUserAgent(context,
+                    TAG), preview ? null : new DefaultBandwidthMeter(), GSYExoHttpDataSource.DEFAULT_CONNECT_TIMEOUT_MILLIS,
+                    GSYExoHttpDataSource.DEFAULT_READ_TIMEOUT_MILLIS, allowCrossProtocolRedirects);
+            if (heads != null && heads.size() > 0) {
+                for (Map.Entry<String, String> header : heads.entrySet()) {
+                    dataSourceFactory.getDefaultRequestProperties().set(header.getKey(), header.getValue());
+                }
+            }
+            return dataSourceFactory;
+        }
+        DefaultHttpDataSourceFactory dataSourceFactory = new DefaultHttpDataSourceFactory(Util.getUserAgent(context,
+                TAG), preview ? null : new DefaultBandwidthMeter(), GSYExoHttpDataSource.DEFAULT_CONNECT_TIMEOUT_MILLIS,
+                GSYExoHttpDataSource.DEFAULT_READ_TIMEOUT_MILLIS, allowCrossProtocolRedirects);
+        if (heads != null && heads.size() > 0) {
+            for (Map.Entry<String, String> header : heads.entrySet()) {
+                dataSourceFactory.getDefaultRequestProperties().set(header.getKey(), header.getValue());
+            }
+        }
+        return dataSourceFactory;
+    }
+
+    public void release() {
+        isCached = false;
+        if (mCache != null) {
+            try {
+                mCache.release();
+                mCache = null;
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    /**
+     * Cache需要release之后才能clear
+     *
+     * @param context
+     * @param cacheDir
+     * @param url
+     */
+    public static void clearCache(Context context, File cacheDir, String url) {
+        try {
+            Cache cache = getCacheSingleInstance(context, cacheDir);
+            if (!TextUtils.isEmpty(url)) {
+                if (cache != null) {
+                    CacheUtil.remove(cache, CacheUtil.generateKey(Uri.parse(url)));
+                }
+            } else {
+                if (cache != null) {
+                    for (String key : cache.getKeys()) {
+                        CacheUtil.remove(cache, key);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
@@ -232,8 +446,9 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
 
     @Override
     public boolean isPlaying() {
-        if (mInternalPlayer == null)
+        if (mInternalPlayer == null) {
             return false;
+        }
         int state = mInternalPlayer.getPlaybackState();
         switch (state) {
             case Player.STATE_BUFFERING:
@@ -285,25 +500,27 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
     @Override
     public void pause() {
         int state = getState();
-        if(isInPlaybackState()
-                && state!=STATE_END
-                && state!=STATE_ERROR
-                && state!=STATE_IDLE
-                && state!=STATE_INITIALIZED
-                && state!=STATE_PAUSED
-                && state!=STATE_STOPPED)
+        if (isInPlaybackState()
+                && state != STATE_END
+                && state != STATE_ERROR
+                && state != STATE_IDLE
+                && state != STATE_INITIALIZED
+                && state != STATE_PAUSED
+                && state != STATE_STOPPED) {
             mInternalPlayer.setPlayWhenReady(false);
+        }
     }
 
     @Override
     public void resume() {
-        if(isInPlaybackState() && getState() == STATE_PAUSED)
+        if (isInPlaybackState() && getState() == STATE_PAUSED) {
             mInternalPlayer.setPlayWhenReady(true);
+        }
     }
 
     @Override
     public void seekTo(int msc) {
-        if(isInPlaybackState()){
+        if (isInPlaybackState()) {
             isPendingSeek = true;
         }
         mInternalPlayer.seekTo(msc);
@@ -335,12 +552,12 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
         mInternalPlayer.release();
     }
 
-    private boolean isInPlaybackState(){
+    private boolean isInPlaybackState() {
         int state = getState();
-        return state!=STATE_END
-                && state!=STATE_ERROR
-                && state!=STATE_INITIALIZED
-                && state!=STATE_STOPPED;
+        return state != STATE_END
+                && state != STATE_ERROR
+                && state != STATE_INITIALIZED
+                && state != STATE_STOPPED;
     }
 
     private VideoListener mVideoListener = new VideoListener() {
@@ -354,12 +571,12 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
             bundle.putInt(EventKey.INT_ARG2, mVideoHeight);
             bundle.putInt(EventKey.INT_ARG3, 0);
             bundle.putInt(EventKey.INT_ARG4, 0);
-            submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_VIDEO_SIZE_CHANGE,bundle);
+            submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_VIDEO_SIZE_CHANGE, bundle);
         }
 
         @Override
         public void onRenderedFirstFrame() {
-            PLog.d(TAG,"onRenderedFirstFrame");
+            PLog.d(TAG, "onRenderedFirstFrame");
             updateStatus(IPlayer.STATE_STARTED);
             submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_VIDEO_RENDER_START, null);
         }
@@ -375,46 +592,46 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
         @Override
         public void onLoadingChanged(boolean isLoading) {
             int bufferPercentage = mInternalPlayer.getBufferedPercentage();
-            if(!isLoading){
+            if (!isLoading) {
                 submitBufferingUpdate(bufferPercentage, null);
             }
-            PLog.d(TAG,"onLoadingChanged : "+ isLoading + ", bufferPercentage = " + bufferPercentage);
+            PLog.d(TAG, "onLoadingChanged : " + isLoading + ", bufferPercentage = " + bufferPercentage);
         }
 
         @Override
         public void onPlayerStateChanged(boolean playWhenReady, int playbackState) {
-            PLog.d(TAG,"onPlayerStateChanged : playWhenReady = "+ playWhenReady
+            PLog.d(TAG, "onPlayerStateChanged : playWhenReady = " + playWhenReady
                     + ", playbackState = " + playbackState);
 
-            if(!isPreparing){
-                if(playWhenReady){
+            if (!isPreparing) {
+                if (playWhenReady) {
                     updateStatus(IPlayer.STATE_STARTED);
                     submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_RESUME, null);
-                }else{
+                } else {
                     updateStatus(IPlayer.STATE_PAUSED);
                     submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_PAUSE, null);
                 }
             }
 
-            if(isPreparing){
-                switch (playbackState){
+            if (isPreparing) {
+                switch (playbackState) {
                     case Player.STATE_READY:
                         isPreparing = false;
                         Format format = mInternalPlayer.getVideoFormat();
                         Bundle bundle = BundlePool.obtain();
-                        if(format!=null){
+                        if (format != null) {
                             bundle.putInt(EventKey.INT_ARG1, format.width);
                             bundle.putInt(EventKey.INT_ARG2, format.height);
                         }
                         updateStatus(IPlayer.STATE_PREPARED);
                         submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_PREPARED, bundle);
 
-                        if(playWhenReady){
+                        if (playWhenReady) {
                             updateStatus(STATE_STARTED);
                             submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_START, null);
                         }
 
-                        if(mStartPos > 0){
+                        if (mStartPos > 0) {
                             mInternalPlayer.seekTo(mStartPos);
                             mStartPos = -1;
                         }
@@ -422,12 +639,12 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
                 }
             }
 
-            if(isBuffering){
-                switch (playbackState){
+            if (isBuffering) {
+                switch (playbackState) {
                     case Player.STATE_READY:
                     case Player.STATE_ENDED:
                         long bitrateEstimate = mBandwidthMeter.getBitrateEstimate();
-                        PLog.d(TAG,"buffer_end, BandWidth : " + bitrateEstimate);
+                        PLog.d(TAG, "buffer_end, BandWidth : " + bitrateEstimate);
                         isBuffering = false;
                         Bundle bundle = BundlePool.obtain();
                         bundle.putLong(EventKey.LONG_DATA, bitrateEstimate);
@@ -436,8 +653,8 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
                 }
             }
 
-            if(isPendingSeek){
-                switch (playbackState){
+            if (isPendingSeek) {
+                switch (playbackState) {
                     case Player.STATE_READY:
                         isPendingSeek = false;
                         submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_SEEK_COMPLETE, null);
@@ -445,11 +662,11 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
                 }
             }
 
-            if(!isPreparing){
-                switch (playbackState){
+            if (!isPreparing) {
+                switch (playbackState) {
                     case Player.STATE_BUFFERING:
                         long bitrateEstimate = mBandwidthMeter.getBitrateEstimate();
-                        PLog.d(TAG,"buffer_start, BandWidth : " + bitrateEstimate);
+                        PLog.d(TAG, "buffer_start, BandWidth : " + bitrateEstimate);
                         isBuffering = true;
                         Bundle bundle = BundlePool.obtain();
                         bundle.putLong(EventKey.LONG_DATA, bitrateEstimate);
@@ -471,13 +688,13 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
 
         @Override
         public void onPlayerError(ExoPlaybackException error) {
-            if(error==null){
+            if (error == null) {
                 submitErrorEvent(OnErrorEventListener.ERROR_EVENT_UNKNOWN, null);
                 return;
             }
-            PLog.e(TAG,error.getMessage()==null?"":error.getMessage());
+            PLog.e(TAG, error.getMessage() == null ? "" : error.getMessage());
             int type = error.type;
-            switch (type){
+            switch (type) {
                 case ExoPlaybackException.TYPE_SOURCE:
                     submitErrorEvent(OnErrorEventListener.ERROR_EVENT_IO, null);
                     break;
@@ -492,7 +709,7 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
 
         @Override
         public void onPlaybackParametersChanged(PlaybackParameters playbackParameters) {
-            PLog.d(TAG,"onPlaybackParametersChanged : " + playbackParameters.toString());
+            PLog.d(TAG, "onPlaybackParametersChanged : " + playbackParameters.toString());
         }
     };
 

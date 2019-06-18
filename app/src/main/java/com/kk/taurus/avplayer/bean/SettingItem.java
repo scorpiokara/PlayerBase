@@ -35,6 +35,9 @@ public class SettingItem {
 
     public static final int CODE_TEST_UPDATE_RENDER = 801;
 
+    public static final int CODE_VIDEO_MP4 = 901;
+    public static final int CODE_VIDEO_M3U8 = 902;
+
     private String itemText;
     private int code;
 
@@ -91,6 +94,9 @@ public class SettingItem {
         items.add(new SettingItem("恢复Controller组件",CODE_CONTROLLER_RESET));
 
         items.add(new SettingItem("刷新Render",CODE_TEST_UPDATE_RENDER));
+
+        items.add(new SettingItem("播放mp4",CODE_VIDEO_MP4));
+        items.add(new SettingItem("播放m3u8",CODE_VIDEO_M3U8));
 
         return items;
     }
