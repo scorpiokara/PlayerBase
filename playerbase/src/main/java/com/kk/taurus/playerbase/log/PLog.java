@@ -24,7 +24,7 @@ import android.util.Log;
 
 public class PLog {
 
-    public static boolean LOG_OPEN = false;
+    public static boolean LOG_OPEN = true;
 
     public static void d(String tag, String message){
         if(!LOG_OPEN)

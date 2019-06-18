@@ -19,6 +19,7 @@ package com.kk.taurus.exoplayer;
 import android.content.Context;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
 import android.text.TextUtils;
 import android.view.Surface;
 import android.view.SurfaceHolder;
@@ -48,11 +49,13 @@ import com.google.android.exoplayer2.source.smoothstreaming.SsMediaSource;
 import com.google.android.exoplayer2.trackselection.DefaultTrackSelector;
 import com.google.android.exoplayer2.trackselection.TrackSelectionArray;
 import com.google.android.exoplayer2.upstream.AssetDataSource;
+import com.google.android.exoplayer2.upstream.BandwidthMeter;
 import com.google.android.exoplayer2.upstream.DataSpec;
 import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter;
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory;
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSourceFactory;
 import com.google.android.exoplayer2.upstream.RawResourceDataSource;
+import com.google.android.exoplayer2.upstream.TransferListener;
 import com.google.android.exoplayer2.upstream.cache.Cache;
 import com.google.android.exoplayer2.upstream.cache.CacheDataSource;
 import com.google.android.exoplayer2.upstream.cache.CacheDataSourceFactory;
@@ -207,7 +210,7 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
 
         //create MediaSource
         MediaSource mediaSource = getMediaSource(videoUri,
-                heads != null && heads.size() > 0,
+                false,
                 PlayerConfig.isUseCache() || dataSource.isCache(),
                 false,
                 StorageUtils.getIndividualCacheDirectory(mAppContext));
@@ -252,7 +255,7 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
 
     /**
      * @param dataSource  链接
-     * @param preview     是否带上header，默认有header自动设置为true
+     * @param preview     是否带上header，默认有header自动设置为true??   测量播放带宽，如果不需要可以传null
      * @param cacheEnable 是否需要缓存
      * @param isLooping   是否循环
      * @param cacheDir    自定义缓存目录
@@ -352,18 +355,30 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
      * 获取SourceFactory
      */
     private com.google.android.exoplayer2.upstream.DataSource.Factory getDataSourceFactory(Context context, boolean preview) {
+
         return new DefaultDataSourceFactory(context, preview ? null : new DefaultBandwidthMeter(),
                 getHttpDataSourceFactory(context, preview));
     }
 
     private com.google.android.exoplayer2.upstream.DataSource.Factory getHttpDataSourceFactory(Context context, boolean preview) {
+
+        // 测量播放带宽，如果不需要可以传null
+        DefaultBandwidthMeter bandwidthMeter = new DefaultBandwidthMeter();
+        bandwidthMeter.addEventListener(new Handler(), new BandwidthMeter.EventListener() {
+            @Override
+            public void onBandwidthSample(int elapsedMs, long bytesTransferred, long bitrateEstimate) {
+                PLog.d(TAG, "elapsedMs: " + elapsedMs + "\tbytesTransferred: " + bytesTransferred + "\tbitrateEstimate: " + bitrateEstimate);
+            }
+        });
+
+
         boolean allowCrossProtocolRedirects = false;
         if (heads != null && heads.size() > 0) {
             allowCrossProtocolRedirects = "true".equals(heads.get("allowCrossProtocolRedirects"));
         }
         if (mSkipSSLChain) {
             GSYExoHttpDataSourceFactory dataSourceFactory = new GSYExoHttpDataSourceFactory(Util.getUserAgent(context,
-                    TAG), preview ? null : new DefaultBandwidthMeter(), GSYExoHttpDataSource.DEFAULT_CONNECT_TIMEOUT_MILLIS,
+                    TAG), preview ? null : bandwidthMeter, GSYExoHttpDataSource.DEFAULT_CONNECT_TIMEOUT_MILLIS,
                     GSYExoHttpDataSource.DEFAULT_READ_TIMEOUT_MILLIS, allowCrossProtocolRedirects);
             if (heads != null && heads.size() > 0) {
                 for (Map.Entry<String, String> header : heads.entrySet()) {
@@ -373,7 +388,7 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
             return dataSourceFactory;
         }
         DefaultHttpDataSourceFactory dataSourceFactory = new DefaultHttpDataSourceFactory(Util.getUserAgent(context,
-                TAG), preview ? null : new DefaultBandwidthMeter(), GSYExoHttpDataSource.DEFAULT_CONNECT_TIMEOUT_MILLIS,
+                TAG), preview ? null : bandwidthMeter, GSYExoHttpDataSource.DEFAULT_CONNECT_TIMEOUT_MILLIS,
                 GSYExoHttpDataSource.DEFAULT_READ_TIMEOUT_MILLIS, allowCrossProtocolRedirects);
         if (heads != null && heads.size() > 0) {
             for (Map.Entry<String, String> header : heads.entrySet()) {
