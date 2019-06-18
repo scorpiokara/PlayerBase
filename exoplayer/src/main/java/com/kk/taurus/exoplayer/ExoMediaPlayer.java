@@ -55,7 +55,6 @@ import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter;
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory;
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSourceFactory;
 import com.google.android.exoplayer2.upstream.RawResourceDataSource;
-import com.google.android.exoplayer2.upstream.TransferListener;
 import com.google.android.exoplayer2.upstream.cache.Cache;
 import com.google.android.exoplayer2.upstream.cache.CacheDataSource;
 import com.google.android.exoplayer2.upstream.cache.CacheDataSourceFactory;
@@ -140,6 +139,12 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
 
         // Measures bandwidth during playback. Can be null if not required.
         mBandwidthMeter = new DefaultBandwidthMeter();
+        mBandwidthMeter.addEventListener(new Handler(), new BandwidthMeter.EventListener() {
+            @Override
+            public void onBandwidthSample(int elapsedMs, long bytesTransferred, long bitrateEstimate) {
+                PLog.d(TAG, "onBandwidthEstimate: 带宽估计 总加载时间" + elapsedMs + "   已加载的字节总数" + bytesTransferred + "应该是网速" + bitrateEstimate / (1024 * 1024));
+            }
+        });
 
         mInternalPlayer.addListener(mEventListener);
 
@@ -361,24 +366,13 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
     }
 
     private com.google.android.exoplayer2.upstream.DataSource.Factory getHttpDataSourceFactory(Context context, boolean preview) {
-
-        // 测量播放带宽，如果不需要可以传null
-        DefaultBandwidthMeter bandwidthMeter = new DefaultBandwidthMeter();
-        bandwidthMeter.addEventListener(new Handler(), new BandwidthMeter.EventListener() {
-            @Override
-            public void onBandwidthSample(int elapsedMs, long bytesTransferred, long bitrateEstimate) {
-                PLog.d(TAG, "elapsedMs: " + elapsedMs + "\tbytesTransferred: " + bytesTransferred + "\tbitrateEstimate: " + bitrateEstimate);
-            }
-        });
-
-
         boolean allowCrossProtocolRedirects = false;
         if (heads != null && heads.size() > 0) {
             allowCrossProtocolRedirects = "true".equals(heads.get("allowCrossProtocolRedirects"));
         }
         if (mSkipSSLChain) {
             GSYExoHttpDataSourceFactory dataSourceFactory = new GSYExoHttpDataSourceFactory(Util.getUserAgent(context,
-                    TAG), preview ? null : bandwidthMeter, GSYExoHttpDataSource.DEFAULT_CONNECT_TIMEOUT_MILLIS,
+                    TAG), preview ? null : mBandwidthMeter, GSYExoHttpDataSource.DEFAULT_CONNECT_TIMEOUT_MILLIS,
                     GSYExoHttpDataSource.DEFAULT_READ_TIMEOUT_MILLIS, allowCrossProtocolRedirects);
             if (heads != null && heads.size() > 0) {
                 for (Map.Entry<String, String> header : heads.entrySet()) {
@@ -388,7 +382,7 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
             return dataSourceFactory;
         }
         DefaultHttpDataSourceFactory dataSourceFactory = new DefaultHttpDataSourceFactory(Util.getUserAgent(context,
-                TAG), preview ? null : bandwidthMeter, GSYExoHttpDataSource.DEFAULT_CONNECT_TIMEOUT_MILLIS,
+                TAG), preview ? null : mBandwidthMeter, GSYExoHttpDataSource.DEFAULT_CONNECT_TIMEOUT_MILLIS,
                 GSYExoHttpDataSource.DEFAULT_READ_TIMEOUT_MILLIS, allowCrossProtocolRedirects);
         if (heads != null && heads.size() > 0) {
             for (Map.Entry<String, String> header : heads.entrySet()) {
