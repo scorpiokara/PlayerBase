@@ -76,7 +76,6 @@ public class BaseVideoViewActivity extends AppCompatActivity implements
         mVideoView.setReceiverGroup(mReceiverGroup);
         mVideoView.setEventHandler(onVideoViewEventHandler);
         mVideoView.setOnPlayerEventListener(this);
-
 //        mVideoView.setVolume(0f, 0f);
     }
 
@@ -328,6 +327,7 @@ public class BaseVideoViewActivity extends AppCompatActivity implements
     protected void onDestroy() {
         super.onDestroy();
         mVideoView.stopPlayback();
+        mReceiverGroup.removeReceiver(DataInter.ReceiverKey.KEY_LOADING_COVER);
         VideoProxyCache.getInstance(this).unRegisterproxyUrl(DataUtils.VIDEO_URL_09);
     }
 

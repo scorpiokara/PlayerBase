@@ -16,8 +16,10 @@
 
 package com.kk.taurus.exoplayer;
 
+import android.annotation.TargetApi;
 import android.content.Context;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.text.TextUtils;
@@ -129,6 +131,7 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
         PlayerLibrary.init(context);
     }
 
+    @TargetApi(Build.VERSION_CODES.N)
     public ExoMediaPlayer() {
         mAppContext = AppContextAttach.getApplicationContext();
         RenderersFactory renderersFactory = new DefaultRenderersFactory(mAppContext,
@@ -139,10 +142,13 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
 
         // Measures bandwidth during playback. Can be null if not required.
         mBandwidthMeter = new DefaultBandwidthMeter();
+
         mBandwidthMeter.addEventListener(new Handler(), new BandwidthMeter.EventListener() {
             @Override
             public void onBandwidthSample(int elapsedMs, long bytesTransferred, long bitrateEstimate) {
-                PLog.d(TAG, "onBandwidthEstimate: 带宽估计 总加载时间" + elapsedMs + "   已加载的字节总数" + bytesTransferred + "应该是网速" + bitrateEstimate / (1024 * 1024));
+                PLog.d(TAG, "onBandwidthEstimate: 带宽估计 总加载时间" + elapsedMs +
+                        "   已加载的:" + bytesTransferred / 1024 + "kb" +
+                        "\t应该是网速" + String.format("%.2f", bitrateEstimate / 1024.00 / 1024.00 * 1000.00 / elapsedMs)+ "Mb/s");
             }
         });
 

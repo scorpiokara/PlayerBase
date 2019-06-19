@@ -18,6 +18,8 @@
             android:layout_centerHorizontal="true"/>
 
         <TextView
+            android:gravity="center"
+            android:id="@+id/cover_player_loading_text"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_below="@id/cover_player_loading_view_loading"

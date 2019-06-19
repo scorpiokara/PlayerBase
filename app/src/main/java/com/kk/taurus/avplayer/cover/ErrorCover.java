@@ -117,9 +117,9 @@ public class ErrorCover extends BaseCover {
             return;
         if(networkState < 0){
             mStatus = STATUS_NETWORK_ERROR;
-            setErrorInfo("无网络！");
-            setHandleInfo("重试");
-            setErrorState(true);
+//            setErrorInfo("无网络！");
+//            setHandleInfo("重试");
+//            setErrorState(true);
         }else{
             if(networkState== PConst.NETWORK_STATE_WIFI){
                 if(mErrorShow){
